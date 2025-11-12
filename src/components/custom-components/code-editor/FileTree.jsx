@@ -50,7 +50,7 @@ import { DeleteSubmissionAlert } from '../DeleteSubmissionAlert';
 import { useParams } from 'react-router';
 import { ContextMenuLabel } from '@radix-ui/react-context-menu';
 
-export default function FileTree({ tree, onFileSelectFromFileTree, refetchFileTree }) {
+export default function FileTree({ tree, onFileSelectFromFileTree, refetchFileTree, onFileRenamed }) {
   const { projectId } = useParams();
   const { createFolderInProject, renameFolderInProject, loadFoldersFromBackend } = useProject();
   const { user } = useAuth();
@@ -347,12 +347,17 @@ export default function FileTree({ tree, onFileSelectFromFileTree, refetchFileTr
                     user={user}
                     refetchFileTree={refetchFileTree}
                     fullTree={mergedTree}
+                    onFileRenamed={onFileRenamed}
                   />
                 ) : (
                   <File
                     file={value}
                     index={key}
                     onFileSelect={onFileSelectFromFileTree}
+                    projectId={projectId}
+                    user={user}
+                    refetchFileTree={refetchFileTree}
+                    onFileRenamed={onFileRenamed}
                   />
                 ),
               )}
@@ -364,7 +369,7 @@ export default function FileTree({ tree, onFileSelectFromFileTree, refetchFileTr
   );
 }
 
-function Folder({ folder, index, onFileSelect, projectId, renameFolderInProject, persistFolders, persistedFolders, user, refetchFileTree, fullTree }) {
+function Folder({ folder, index, onFileSelect, projectId, renameFolderInProject, persistFolders, persistedFolders, user, refetchFileTree, fullTree, onFileRenamed }) {
   const [isOpen, setIsOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   // Only show the folder name, not the full path, for renaming
@@ -734,9 +739,18 @@ function Folder({ folder, index, onFileSelect, projectId, renameFolderInProject,
                     user={user}
                     refetchFileTree={refetchFileTree}
                     fullTree={fullTree}
+                    onFileRenamed={onFileRenamed}
                   />
                 ) : (
-                  <File file={value} index={key} onFileSelect={onFileSelect} />
+                  <File
+                    file={value}
+                    index={key}
+                    onFileSelect={onFileSelect}
+                    projectId={projectId}
+                    user={user}
+                    refetchFileTree={refetchFileTree}
+                    onFileRenamed={onFileRenamed}
+                  />
                 )}
               </SidebarMenuSub>
             </CollapsibleContent>
@@ -746,13 +760,71 @@ function Folder({ folder, index, onFileSelect, projectId, renameFolderInProject,
   );
 }
 
-function File({ file, index, onFileSelect }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+function File({ file, index, onFileSelect, projectId, user, refetchFileTree, onFileRenamed }) {
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(file.name);
+  const inputRef = useRef(null);
 
-  // Handle right-click on file component
-  const handleContextMenu = (e) => {
-    e.preventDefault();
-    setMenuOpen(true);
+  // Auto-focus input when renaming starts
+  useEffect(() => {
+    if (renaming && inputRef.current) {
+      // Use setTimeout to ensure DOM is updated
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.select();
+        }
+      }, 0);
+    }
+  }, [renaming]);
+
+  const handleRename = async () => {
+    if (!renameValue.trim() || renameValue === file.name) {
+      setRenaming(false);
+      setRenameValue(file.name);
+      return;
+    }
+
+    try {
+      // Preserve folder path when renaming
+      const filePath = file.path || file.name;
+      const pathParts = filePath.split('/');
+      
+      // Replace just the filename (last part) with the new name
+      pathParts[pathParts.length - 1] = renameValue;
+      const newPath = pathParts.join('/');
+      
+      // Update filename via backend API
+      await moveSubmission(user.uid, file.id, newPath);
+      
+      // Notify parent component to update open tabs
+      if (onFileRenamed) {
+        onFileRenamed(file, renameValue, newPath);
+      }
+      
+      toast.success('File renamed');
+      setRenaming(false);
+      
+      // Refetch file tree to update UI
+      if (refetchFileTree) {
+        await refetchFileTree();
+      }
+    } catch (err) {
+      console.error('Failed to rename file', err);
+      toast.error('Failed to rename file');
+      setRenameValue(file.name);
+      setRenaming(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleRename();
+    } else if (e.key === 'Escape') {
+      setRenaming(false);
+      setRenameValue(file.name);
+    }
   };
 
   const handleDragStart = (e) => {
@@ -766,19 +838,35 @@ function File({ file, index, onFileSelect }) {
   return (
     <SidebarMenuItem
       key={index}
-      onClick={() => onFileSelect(file)}
-      className="roudned-lg"
+      onClick={() => !renaming && onFileSelect(file)}
+      className="rounded-lg"
       draggable
       onDragStart={handleDragStart}
     >
       <ContextMenu>
         <ContextMenuTrigger className="flex gap-2 items-center">
           <SidebarMenuButton>
-            <FileCode className="size-4" />
-            {file.name}
+            <FileCode className="size-4 flex-shrink-0" />
+            {renaming ? (
+              <input
+                ref={inputRef}
+                type="text"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={handleRename}
+                onKeyDown={handleKeyDown}
+                className="flex-1 bg-transparent border-b border-input focus:outline-none focus:border-ring"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="truncate">{file.name}</span>
+            )}
           </SidebarMenuButton>
         </ContextMenuTrigger>
         <ContextMenuContent>
+          <ContextMenuItem onClick={() => setRenaming(true)}>
+            Rename
+          </ContextMenuItem>
           <ContextMenuItem>
             <DeleteSubmissionAlert submission={file} />
           </ContextMenuItem>

@@ -29,6 +29,22 @@ export default function ResizableCodeEditor({
   }
 }, [activeFile]);
 
+  // Handle file rename to update open tabs
+  const handleFileRenamed = (oldFile, newName, newPath) => {
+    setOpenFiles((prevFiles) =>
+      prevFiles.map((file) =>
+        file.id === oldFile.id
+          ? { ...file, name: newName, path: newPath }
+          : file
+      )
+    );
+    
+    // Update active file if it's the one being renamed
+    if (activeFile && activeFile.id === oldFile.id) {
+      setActiveFile({ ...activeFile, name: newName, path: newPath });
+    }
+  };
+
   const openNewFile = (targetFile) => {
     console.log('Current open files', openFiles);
     console.log('About to open a file in the FileTabBar...');
@@ -117,6 +133,7 @@ export default function ResizableCodeEditor({
           tree={tree}
           refetchFileTree={refetchFileTree}
           onFileSelectFromFileTree={openNewFile} // Callback function for selecting a file from FileTree
+          onFileRenamed={handleFileRenamed} // Callback for when a file is renamed
         />{' '}
       </ResizablePanel>
       <ResizableHandle />
